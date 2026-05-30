@@ -5,20 +5,26 @@ using BepInEx.Logging;
 using HarmonyLib;
 using System.Reflection;
 using KKAPI;
+using KKAPI.Utilities;
 using UnityEngine;
+using KKAPI.Studio.UI.Toolbars;
 
 namespace StudioCharaEditor
 {
     [BepInPlugin(GUID, Name, Version)]
-    [BepInDependency(KoikatuAPI.GUID, "1.4")]
+    [BepInDependency(KoikatuAPI.GUID, "1.43")]
+    [BepInDependency("KCOX", "7.0")]
+    [BepInDependency("com.animal42069.studiobetterpenetration", BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInDependency("com.hooh.hooah", BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency("mikke.pushUpAI", BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency("com.fairbair.hs2_boobsettings", BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInProcess("StudioNEOV2")]
     [BepInProcess("StudioNEOV2.exe")]
     public class StudioCharaEditor : BaseUnityPlugin
     {
         public const string GUID = "Countd360.StudioCharaEditor.HS2";
         public const string Name = "Studio Chara Editor";
-        public const string Version = "2.1.0";
+        public const string Version = "2.5.22";
         public const string DefaultPathMacro = "$DEFAULT_CHAR_PATH$";
         public const string DefaultCoordMacro = "$DEFAULT_COORD_PATH$";
 
@@ -34,14 +40,16 @@ namespace StudioCharaEditor
         public static ConfigEntry<bool> UnlimitedSlider { get; private set; }
         public static ConfigEntry<bool> ShowSelectedThumb { get; private set; }
         public static ConfigEntry<bool> CloseListAfterSelect { get; private set; }
-
         public static ConfigEntry<bool> VerboseMessage { get; private set; }
-
         public static ConfigEntry<int> UIXPosition { get; private set; }
         public static ConfigEntry<int> UIYPosition { get; private set; }
         public static ConfigEntry<int> UIWidth { get; private set; }
         public static ConfigEntry<int> UIHeight { get; private set; }
         public static ConfigEntry<string> UILanguage { get; private set; }
+        public static ConfigEntry<float> UIScale { get; private set; }
+
+        internal SimpleToolbarToggle _toolbarCharEditor;
+        private Harmony harmony;
 
         //private ConfigEntry<string> configGreeting;
         //private ConfigEntry<bool> configDisplayGreeting;
@@ -50,6 +58,7 @@ namespace StudioCharaEditor
         {
             Instance = this;
             Logger = base.Logger;
+            Logger.LogInfo("Studio Chara Editor loaded.");
 
             // config
             KeyShowUI = Config.Bind("General", "StudioCharaEditor UI shortcut key", new KeyboardShortcut(KeyCode.D, KeyCode.LeftShift), "Toggles the main UI on and off.");
@@ -68,7 +77,10 @@ namespace StudioCharaEditor
             UIWidth = Config.Bind("GUI", "Main GUI window width", 600, "Main window width, minimum 600, set it when UI is hided.");
             UIHeight = Config.Bind("GUI", "Main GUI window height", 400, "Main window height, minimum 400, set it when UI is hided.");
             UILanguage = Config.Bind("GUI", "GUI Language", "default", "Language setting, valid setting can be found in HS2StudioCharaEditor.xml. Need reload.");
-
+            UIScale = Config.Bind("GUI", "UI Scale", 1.0f,
+                new ConfigDescription(
+                    "Scale of the entire UI. 1.0 = 100% (designed for 1080p). Try 1.33 for 1440p.",
+                    new AcceptableValueRange<float>(0.5f, 3.0f)));
 
             /*
             configGreeting = Config.Bind("General",   // The section under which the option is shown
@@ -89,11 +101,43 @@ namespace StudioCharaEditor
             UnityEngine.Object.DontDestroyOnLoad(gameObject);
             CharaEditorMgr.Install(gameObject);
 
-            // Patch
-            //Harmony harmony = new Harmony(GUID);
-            //harmony.PatchAll(Assembly.GetExecutingAssembly());
-            
+            // Patch compatibility hooks that must run after optional plugin dependencies load.
+            harmony = new Harmony(GUID);
+            PluginBetterPenetration.InstallHarmonyPatches(harmony);
+            PluginHooahComponents.Initialize(harmony);
+
+            // Toolbar Button
+            _toolbarCharEditor = new SimpleToolbarToggle(
+                "Graphics",
+                "Open Studio CharaEditor Inspector window. Hotkey: " + KeyShowUI.Value,
+                () => ResourceUtils.GetEmbeddedResource("toolbarbutton.png").LoadTexture(),
+                false,
+                this,
+                val => ToggleUI(val));
+            ToolbarManager.AddLeftToolbarControl(_toolbarCharEditor);
         }
 
+        private void ToggleUI(bool show)
+        {
+            //  Find UI in scene
+            var ui = UnityEngine.Object.FindObjectOfType<CharaEditorUI>();
+            if (ui != null)
+            {
+                ui.VisibleGUI = show;
+                if (show)
+                {
+                    CharaEditorMgr.Instance?.ReloadDictionary();
+                    ui.windowRect = new Rect(UIXPosition.Value, UIYPosition.Value,
+                        Math.Max(600, UIWidth.Value), Math.Max(400, UIHeight.Value));
+                }
+                else
+                {
+                    UIXPosition.Value = (int)ui.windowRect.x;
+                    UIYPosition.Value = (int)ui.windowRect.y;
+                    UIWidth.Value = (int)ui.windowRect.width;
+                    UIHeight.Value = (int)ui.windowRect.height;
+                }
+            }
+        }
     }
 }

@@ -1,16 +1,15 @@
-﻿using Studio;
+using Studio;
 using AIChara;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
 using PushUpAI;
 using HS2_BoobSettings;
-using KKABMX.Core;
 using KoiSkinOverlayX;
 using KoiClothesOverlayX;
 using MessagePack;
 using CharaCustom;
-using static Illusion.Utils;
+using KKABMX.Core;
 
 namespace StudioCharaEditor
 {
@@ -181,11 +180,12 @@ namespace StudioCharaEditor
 
         // extend plugins
         public object PushUpController { get; private set; }
-        public bool HasPushUpPlugin { 
+        public bool HasPushUpPlugin
+        {
             get
             {
                 return PushUpController != null;
-            } 
+            }
         }
         public object BoobController { get; private set; }
         public bool HasBoobSettingPlugin
@@ -219,7 +219,7 @@ namespace StudioCharaEditor
         }
 
         public void Initialize()
-        { 
+        {
             // check plugins
             try
             {
@@ -312,7 +312,14 @@ namespace StudioCharaEditor
             {
                 chaCtrl.releaseCustomInputTexture = false;
                 chaCtrl.loadWithDefaultColorAndPtn = false;
-                chaCtrl.ChangeClothes(false);
+                if (PluginBetterPenetration.HasStudioPlugin())
+                {
+                    PluginBetterPenetration.LogSkippedInitialClothesRefresh();
+                }
+                else
+                {
+                    chaCtrl.ChangeClothes(false);
+                }
                 textureInited = true;
             }
             else if (!init && textureInited)
@@ -330,6 +337,7 @@ namespace StudioCharaEditor
             myDetailDict = new Dictionary<string, CharaDetailInfo>();
             myDetailSet = new Dictionary<string, List<CharaDetailInfo>>();
             myUpdateSequence = new List<string>();
+            bool hasMultiDetailPlugin = PluginMultiDetail.IsAvailable;
 
             bool isDetailInCategory(string cdiKey)
             {
@@ -353,7 +361,7 @@ namespace StudioCharaEditor
                 myDetailSet[setName].Add(cdi);
                 myDetailDict[key] = cdi;
             }
-            
+
             void addToUpdateSequence(CharaDetailInfo cdi)
             {
                 if (!cdi.DetailDefine.IsData)
@@ -416,6 +424,22 @@ namespace StudioCharaEditor
             // vanilla chara detail set
             foreach (CharaDetailDefine cdd in CharaDetailSet.Details)
             {
+                if (hasMultiDetailPlugin)
+                {
+                    if (PluginMultiDetail.IsNativeDetailSelector(cdd.Key))
+                    {
+                        continue;
+                    }
+                }
+                else if (PluginMultiDetail.IsSlotDetailSelector(cdd.Key))
+                {
+                    continue;
+                }
+                else if (PluginMultiDetail.IsPowerDetailSlider(cdd.Key))
+                {
+                    continue;
+                }
+
                 if (!isDetailInCategory(cdd.Key))
                 {
                     continue;
@@ -430,7 +454,8 @@ namespace StudioCharaEditor
             foreach (string clothName in myCategorySet[CT1_CTHS])
             {
                 //string setName = CT1_CTHS + "#" + clothName;
-                int clothIndex = myCategorySet[CT1_CTHS].IndexOf(clothName);
+                // Use FEMALE_CLOTHES_NAME as the standard array to always get the correct in-game slot ID
+                int clothIndex = Array.IndexOf(FEMALE_CLOTHES_NAME, clothName);
                 foreach (CharaDetailDefine cdd in CharaDetailSet.ClothDetailBuilder(chaCtrl, clothIndex))
                 {
                     CharaDetailInfo cdi = new CharaDetailInfo(chaCtrl, cdd);
@@ -496,8 +521,22 @@ namespace StudioCharaEditor
                     addToDetailSet(cdi);
                     addToUpdateSequence(cdi);
                 }
+                // body detail
+                foreach (CharaDetailDefine cdd in PluginOverlayDetailSet.BuildDetailSkinOverlayDefine(CT1_BODY))
+                {
+                    CharaDetailInfo cdi = new CharaDetailInfo(chaCtrl, cdd);
+                    addToDetailSet(cdi);
+                    addToUpdateSequence(cdi);
+                }
                 // face
                 foreach (CharaDetailDefine cdd in PluginOverlayDetailSet.BuildSkinOverlayDefine(CT1_FACE))
+                {
+                    CharaDetailInfo cdi = new CharaDetailInfo(chaCtrl, cdd);
+                    addToDetailSet(cdi);
+                    addToUpdateSequence(cdi);
+                }
+                // face detail
+                foreach (CharaDetailDefine cdd in PluginOverlayDetailSet.BuildDetailSkinOverlayDefine(CT1_FACE))
                 {
                     CharaDetailInfo cdi = new CharaDetailInfo(chaCtrl, cdd);
                     addToDetailSet(cdi);
@@ -528,7 +567,7 @@ namespace StudioCharaEditor
             List<string> accKeys = new List<string>();
             int accCount = PluginMoreAccessories.GetAccessoryCount(chaCtrl);
             // build myAccessoriesInfo
-            for (int slotNo = 0; slotNo < accCount; slotNo ++)
+            for (int slotNo = 0; slotNo < accCount; slotNo++)
             {
                 var ai = new AccessoryInfo(chaCtrl, slotNo);
                 myAccessoriesInfo.Add(ai);
@@ -556,7 +595,7 @@ namespace StudioCharaEditor
                     }
                 }
             }
- 
+
             return accKeys;
         }
 
@@ -778,7 +817,8 @@ namespace StudioCharaEditor
                 }
                 // create new ones
                 myDetailSet[setName].Clear();
-                int clothIndex = myCategorySet[CT1_CTHS].IndexOf(category2);
+                // Use FEMALE_CLOTHES_NAME as the standard array to always get the correct in-game slot ID
+                int clothIndex = Array.IndexOf(FEMALE_CLOTHES_NAME, category2);
                 foreach (CharaDetailDefine cdd in CharaDetailSet.ClothDetailBuilder(ociTarget.charInfo, clothIndex))
                 {
                     CharaDetailInfo cdi = new CharaDetailInfo(ociTarget.charInfo, cdd);
@@ -804,7 +844,7 @@ namespace StudioCharaEditor
             void setColorByIndex(int i)
             {
                 var ci = chaCtrl.GetClothesDefaultSetting(partIndex, i);
-                
+
                 chaCtrl.nowCoordinate.clothes.parts[partIndex].colorInfo[i].baseColor = ci.baseColor;
                 chaCtrl.chaFile.coordinate.clothes.parts[partIndex].colorInfo[i].baseColor = ci.baseColor;
 
@@ -851,7 +891,7 @@ namespace StudioCharaEditor
 
             if (updateColor)
             {
-                chaCtrl.ChangeCustomClothes(partIndex, true, updatePtn1, updatePtn2, updatePtn3);
+                CharaDetailSet.updateClothCustomTexture(chaCtrl, partIndex, true, updatePtn1, updatePtn2, updatePtn3);
                 UpdateDetailInfo_ClothType(category2);
             }
 
@@ -938,7 +978,7 @@ namespace StudioCharaEditor
 
             if (colorIndex == -1)
             {
-                for (int j = 0; j < 4; j ++)
+                for (int j = 0; j < 4; j++)
                 {
                     bool res = PluginMoreAccessories.GetAccessoryDefaultColor(ref color, ref gloss, ref metallic, chaCtrl, accInfo.slotNo, j);
                     if (res)
@@ -968,7 +1008,7 @@ namespace StudioCharaEditor
             ChaControl chaCtrl = ociTarget.charInfo;
             AccessoryInfo accInfo = GetAccessoryInfoByKey(accKey);
             bool updateColor = false;
-            
+
             if (accInfo.accCmp != null && accInfo.accCmp.typeHair)
             {
                 accInfo.partsInfo.colorInfo[0].color = chaCtrl.fileHair.parts[hairIndex].baseColor;
@@ -979,7 +1019,7 @@ namespace StudioCharaEditor
                 accInfo.partsInfo.colorInfo[0].metallicPower = chaCtrl.fileHair.parts[hairIndex].metallic;
                 if (accInfo.IsVanillaSlot)
                 {
-                    for (int i = 0; i < 4; i ++)
+                    for (int i = 0; i < 4; i++)
                     {
                         byte[] bytes = MessagePackSerializer.Serialize<ChaFileAccessory.PartsInfo.ColorInfo>(accInfo.partsInfo.colorInfo[i]);
                         accInfo.orgPartsInfo.colorInfo[i] = MessagePackSerializer.Deserialize<ChaFileAccessory.PartsInfo.ColorInfo>(bytes);
@@ -1341,7 +1381,7 @@ namespace StudioCharaEditor
 
         static public bool DataValueEqual(object val1, object val2)
         {
-            if (val1 == null) 
+            if (val1 == null)
             {
                 return val2 == null;
             }
