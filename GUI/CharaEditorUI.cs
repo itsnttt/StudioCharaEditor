@@ -3228,7 +3228,8 @@ namespace StudioCharaEditor
             DrawSelectorFavoriteButton(panel, info, SelectorPanelButtonHeight);
             Color buttonColor = GUI.color;
             string displayName = GetSelectorDisplayName(info);
-            GUIContent content = new GUIContent(string.Format("#{0}: {1}", info.id, displayName), string.Format("#{0}: {1}", info.id, displayName));
+            string label = string.Format("#{0}: {1}", info.id, displayName);
+            GUIContent content = new GUIContent(label, label);
             Rect itemRect = GUILayoutUtility.GetRect(content, GUI.skin.button, GUILayout.Height(SelectorPanelButtonHeight), GUILayout.ExpandWidth(true));
             if (info.id == selectedId)
             {
@@ -3256,7 +3257,8 @@ namespace StudioCharaEditor
             DrawSelectorFavoriteButton(panel, info, 20f);
             Color buttonColor = GUI.color;
             string displayName = GetSelectorDisplayName(info);
-            GUIContent content = new GUIContent(string.Format("#{0}: {1}", info.id, displayName), string.Format("#{0}: {1}", info.id, displayName));
+            string label = string.Format("#{0}: {1}", info.id, displayName);
+            GUIContent content = new GUIContent(label, label);
             Rect itemRect = GUILayoutUtility.GetRect(content, GUI.skin.button, GUILayout.ExpandWidth(true));
             if (info.id == selectedId)
             {
@@ -3284,7 +3286,7 @@ namespace StudioCharaEditor
             }
 
             panel.DetailInfo.DetailDefine.Set(panel.ChaCtrl, id);
-            ClearSelectorCache();
+            InvalidateSelectorCacheAfterSelect(panel.Name);
             if (panel.DetailInfo.DetailDefine.Upd != null && !LaterUpdate)
             {
                 panel.DetailInfo.DetailDefine.Upd(panel.ChaCtrl);
@@ -3773,7 +3775,6 @@ namespace StudioCharaEditor
                                     PluginMoreAccessories.AddTenAccessorySlots(cec.ociTarget.charInfo);
                                 }
                                 cec.RefreshAccessoriesList();
-                                ClearSelectorCache();
                             }
 
                             // copy slots
@@ -3790,6 +3791,9 @@ namespace StudioCharaEditor
                                 }
                             }
 
+                            // Pasting can add slots and change slot categories, both of
+                            // which change the valid accessory-ID lists, so refresh the cache.
+                            ClearSelectorCache();
                             detailPageSelect = SelectMode.Normal;
                         }
                         if (GUILayout.Button(LC("Cancel")))
@@ -3909,6 +3913,7 @@ namespace StudioCharaEditor
                             if (pageClipboard.Count > 0 && GUILayout.Button(LC("Paste Page")))
                             {
                                 cec.SetDataDict(pageClipboard);
+                                ClearSelectorCache();
                             }
                             if (pageClipboard.Count > 0 && GUILayout.Button(LC("Paste Select")))
                             {
@@ -3973,6 +3978,7 @@ namespace StudioCharaEditor
                                     }
                                 }
                                 cec.SetDataDict(pageSelClipboard);
+                                ClearSelectorCache();
                                 detailPageSelect = SelectMode.Normal;
                             }
                             if (GUILayout.Button(LC("Cancel")))
@@ -4004,11 +4010,13 @@ namespace StudioCharaEditor
                 if (GUILayout.Button(LC("Paste All"), btnstyle, GUILayout.Width(cbwidth)))
                 {
                     cec.SetDataDict(clipboard);
+                    ClearSelectorCache();
                 }
                 GUI.enabled = oldEnabled;
                 if (GUILayout.Button(LC("Revert All"), btnstyle, GUILayout.Width(cbwidth)))
                 {
                     cec.RevertAll();
+                    ClearSelectorCache();
                 }
                 if (GUILayout.Button(LC("Save"), btnstyle, GUILayout.Width(cbwidth)))
                 {
@@ -4235,7 +4243,7 @@ namespace StudioCharaEditor
                 if (id != oldId)
                 {
                     dInfo.DetailDefine.Set(chaCtrl, id);
-                    ClearSelectorCache();
+                    InvalidateSelectorCacheAfterSelect(name);
                     if (dInfo.DetailDefine.Upd != null && !LaterUpdate) dInfo.DetailDefine.Upd(chaCtrl);
                 }
             }
@@ -5355,6 +5363,25 @@ namespace StudioCharaEditor
             }
         }
 
+        /// <summary>
+        /// Invalidate the selector cache after the user picks a new value.
+        /// A selector's available item list is built from the game catalog and
+        /// stays the same for the whole session, so picking a different value
+        /// keeps the same item set and the cached list/index/folders can be
+        /// reused. Rebuilding them on every click (the old behaviour) is what
+        /// caused the lag when choosing cloth/accessory items in large lists.
+        /// The one exception is an accessory's category: changing it changes
+        /// which accessory IDs are valid, so the sibling "Acc ID" list must be
+        /// refreshed.
+        /// </summary>
+        private void InvalidateSelectorCacheAfterSelect(string changedDetailName)
+        {
+            if (changedDetailName == "Acc Category")
+            {
+                ClearSelectorCache();
+            }
+        }
+
         private void ClearSelectorRuntimeCache(string selectorKey)
         {
             if (string.IsNullOrEmpty(selectorKey))
@@ -5503,10 +5530,12 @@ namespace StudioCharaEditor
 
         private string LC(string org)
         {
-            if (curLocalizationDict != null && curLocalizationDict.ContainsKey(org) && !string.IsNullOrWhiteSpace(curLocalizationDict[org]))
-                return curLocalizationDict[org];
-            else
-                return org;
+            // Called for nearly every label every frame, so keep it to a single lookup.
+            if (curLocalizationDict != null &&
+                curLocalizationDict.TryGetValue(org, out string translated) &&
+                !string.IsNullOrWhiteSpace(translated))
+                return translated;
+            return org;
         }
 
         private static int CompareSlotNo(string x, string y)
