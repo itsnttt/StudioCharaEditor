@@ -222,6 +222,12 @@ namespace StudioCharaEditor
         {
             public string Name;
             public string SelectorKey;
+            // The main-window page (category1/category2) this panel is bound to,
+            // plus a page-independent "role" key, so the panel can follow tab and
+            // slot switches to the equivalent selector on the new page.
+            public string Category1;
+            public string Category2;
+            public string RoleKey;
             public ChaControl ChaCtrl;
             public CharaDetailInfo DetailInfo;
             public Vector2 Scroll;
@@ -970,6 +976,9 @@ namespace StudioCharaEditor
                 {
                     OnSelectChange(curSel);
                 }
+
+                // Keep the open selector window following the active tab/slot.
+                SyncSelectorSidePanelToActivePage();
             }
 
             // house keeping
@@ -3303,11 +3312,17 @@ namespace StudioCharaEditor
                 thumbPool[name] = new Dictionary<string, Texture2D>();
             }
 
+            string category1 = GetDetailCategory1(selectorKey);
+            string category2 = GetDetailCategory2(selectorKey);
+
             PlaceSelectorWindowNearMain();
             selectorSidePanel = new SelectorSidePanel
             {
                 Name = name,
                 SelectorKey = selectorKey,
+                Category1 = category1,
+                Category2 = category2,
+                RoleKey = GetSelectorRoleKey(category2, name),
                 ChaCtrl = chaCtrl,
                 DetailInfo = dInfo,
                 ThumbList = thumbList,
@@ -3316,6 +3331,134 @@ namespace StudioCharaEditor
                 Scroll = new Vector2(0f, Math.Max(0, selectedIndex) * rowHeight + ThumbListRowGap),
                 PendingScrollToSelected = true
             };
+            ClearSelectorRuntimeCache(selectorKey);
+        }
+
+        /// <summary>
+        /// A selector's "role" is its detail name with the page-specific cloth-slot
+        /// prefix removed, so equivalent selectors on different pages share a role.
+        /// e.g. "Top Type" (page "Top") and "Bot Type" (page "Bot") both map to
+        /// "Type"; "Acc ID" (per-slot) stays "Acc ID". Used to follow the open
+        /// selector window when the user switches tabs or accessory slots.
+        /// </summary>
+        private static string GetSelectorRoleKey(string category2, string detailName)
+        {
+            if (!string.IsNullOrEmpty(category2) &&
+                !string.IsNullOrEmpty(detailName) &&
+                detailName.StartsWith(category2 + " ", StringComparison.Ordinal))
+            {
+                return detailName.Substring(category2.Length + 1);
+            }
+            return detailName ?? string.Empty;
+        }
+
+        /// <summary>
+        /// When the open selector window ("second UI") is bound to a page the user
+        /// is no longer viewing, rebind it to the equivalent selector on the
+        /// current page (e.g. switching the cloth tab Top -> Bot, or switching
+        /// accessory slots). If the new page has no matching selector, close it.
+        /// </summary>
+        private void SyncSelectorSidePanelToActivePage()
+        {
+            SelectorSidePanel panel = selectorSidePanel;
+            if (panel == null || ociTarget == null)
+            {
+                return;
+            }
+
+            CharaEditorController cec = CharaEditorMgr.Instance?.GetEditorController(ociTarget);
+            if (cec == null || panel.ChaCtrl != cec.ociTarget.charInfo)
+            {
+                return;
+            }
+
+            if (catelogIndex1 < 0 || catelogIndex1 >= CharaEditorController.CATEGORY1.Length)
+            {
+                return;
+            }
+            string category1 = CharaEditorController.CATEGORY1[catelogIndex1];
+            string[] category2List = cec.GetCategoryList(category1);
+            int index = catelogIndex2[catelogIndex1];
+            if (index < 0 || index >= category2List.Length)
+            {
+                return;
+            }
+            string category2 = category2List[index];
+            if (category2.StartsWith("==") || category2.StartsWith("++"))
+            {
+                return;
+            }
+
+            // Already showing the active page, nothing to do.
+            if (panel.Category1 == category1 && panel.Category2 == category2)
+            {
+                return;
+            }
+
+            CharaDetailInfo match = FindSelectorByRole(cec, category1, category2, panel.RoleKey);
+            if (match != null)
+            {
+                RebindSelectorSidePanel(panel, category1, category2, match);
+            }
+            else
+            {
+                CloseSelectorSidePanel();
+            }
+        }
+
+        private CharaDetailInfo FindSelectorByRole(CharaEditorController cec, string category1, string category2, string roleKey)
+        {
+            if (string.IsNullOrEmpty(roleKey))
+            {
+                return null;
+            }
+
+            foreach (CharaDetailInfo dInfo in cec.GetDetailInfoList(category1, category2))
+            {
+                if (dInfo.DetailDefine.Type != CharaDetailDefine.CharaDetailDefineType.SELECTOR)
+                {
+                    continue;
+                }
+                string name = GetDetailName(dInfo.DetailDefine.Key);
+                // "Acc Parent"/"Acc Category" are list-only selectors, not thumb panels.
+                if (name == "Acc Parent" || name == "Acc Category")
+                {
+                    continue;
+                }
+                if (GetSelectorRoleKey(category2, name) == roleKey)
+                {
+                    return dInfo;
+                }
+            }
+            return null;
+        }
+
+        private void RebindSelectorSidePanel(SelectorSidePanel panel, string category1, string category2, CharaDetailInfo dInfo)
+        {
+            string selectorKey = dInfo.DetailDefine.Key;
+            string name = GetDetailName(selectorKey);
+            bool thumbList = name != "Acc Parent" && name != "Acc Category";
+            if (!thumbPool.ContainsKey(name))
+            {
+                thumbPool[name] = new Dictionary<string, Texture2D>();
+            }
+
+            panel.Name = name;
+            panel.SelectorKey = selectorKey;
+            panel.Category1 = category1;
+            panel.Category2 = category2;
+            panel.RoleKey = GetSelectorRoleKey(category2, name);
+            panel.DetailInfo = dInfo;
+            panel.ThumbList = thumbList;
+            if (!thumbList)
+            {
+                panel.ViewMode = SelectorViewMode.List;
+            }
+            panel.SearchText = string.Empty;
+            panel.SelectedFolderKey = SelectorFolderAllKey;
+            panel.FolderInfoCount = -1;
+            panel.Scroll = Vector2.zero;
+            panel.PendingScrollToSelected = true;
             ClearSelectorRuntimeCache(selectorKey);
         }
 
@@ -5477,6 +5620,13 @@ namespace StudioCharaEditor
             }
 
             return detailKey.Substring(secondSep + 1, thirdSep - secondSep - 1);
+        }
+
+        private static string GetDetailCategory1(string detailKey)
+        {
+            char keySeparator = CharaEditorController.KEY_SEP_CHAR[0];
+            int firstSep = detailKey.IndexOf(keySeparator);
+            return firstSep < 0 ? detailKey : detailKey.Substring(0, firstSep);
         }
 
         private static string GetDetailCategory2(string detailKey)
